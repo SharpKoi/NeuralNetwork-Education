@@ -1,3 +1,6 @@
-# Neural Network
-A simple api for building a neural network model easily.  
-To see usage example please read the `dnn_demo.ipynb`.  
+# Neural Network - Education
+This project is for education. It is not so effective but clear and beginner-friendly.  
+
+If you are currently studying deep learning or one who is interested at neural network, this project may help you.  
+
+To see usage please read the `dnn_demo.ipynb`.  

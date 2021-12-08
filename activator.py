@@ -2,11 +2,20 @@ import numpy as np
 
 
 def softmax(x, derivative=False):
-    x_exp = np.exp(x-np.max(x))
+    x_exp = np.exp(x-np.max(x))     # avoid Inf values
     y = x_exp / x_exp.sum()
     if derivative:
         # TODO: find the derivation of softmax function.
+
         pass
+
+    return y
+
+
+def tanh(x, derivative=False):
+    y = np.tanh(x)
+    if derivative:
+        return 1-np.square(x)
 
     return y
 
