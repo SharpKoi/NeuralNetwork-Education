@@ -32,18 +32,21 @@ class Linear(Layer):
         # need to return output to the next layer
         return self.output
 
-    def backward_propagate(self, output_error, learning_rate):
+    def backward_propagate(self, output_error: np.ndarray, learning_rate):
         # shape of output_error: (batch_size, output_dim=units)
         batch_size = output_error.shape[0]
-        grad_bias: np.ndarray = np.array([np.dot(self.weights.T, y) for y in output_error])
+
+        # the three gradients of J are from the derivation of backward propagation.
+        grad_hypothesis: np.ndarray = np.array([np.dot(self.weights.T, y) for y in output_error])
         grad_weights: np.ndarray = np.array([np.outer(output_error[i], self.input[i]) for i in range(batch_size)])
+        grad_bias: np.ndarray = output_error
 
         # batched gradient descent
         if self.trainable:
             self.weights -= learning_rate * grad_weights.mean(axis=0)
-            self.bias -= learning_rate * output_error.mean(axis=0)
+            self.bias -= learning_rate * grad_bias.mean(axis=0)
 
-        return grad_bias
+        return grad_hypothesis
 
     def concatenate(self, last_layer: Layer):
         if self.input_shape is None:
