@@ -1,13 +1,14 @@
 import numpy as np
 
 
-def softmax(x, derivative=False):
-    x_exp = np.exp(x-np.max(x))     # avoid Inf values
-    y = x_exp / x_exp.sum()
-    if derivative:
-        # TODO: find the derivation of softmax function.
+def softmax(x, derivative=False) -> np.ndarray:
+    # more stable softmax. Avoid inf. value
+    x_exp = np.exp(x-np.max(x))
+    y = x_exp / np.sum(x_exp)
 
-        pass
+    if derivative:
+        n = len(x)
+        y = np.array([[y[i] * (int(i == j) - y[j]) for j in range(n)] for i in range(n)])
 
     return y
 
