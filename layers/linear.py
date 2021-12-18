@@ -51,7 +51,7 @@ class Linear(Layer):
     def concatenate(self, last_layer: Layer):
         if self.input_shape is None:
             self.input_shape = last_layer.output_shape
-            self.weights = np.random.randn(*(self.output_shape + self.input_shape))
+            self.weights = np.random.uniform(*(self.output_shape + self.input_shape))
 
         assert self.input_shape == last_layer.output_shape, \
             f'The input shape {self.input_shape} of layer "{self.name}" ' \
