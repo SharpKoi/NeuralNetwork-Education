@@ -1,4 +1,3 @@
-import cupy as cp
 import numpy as np
 
 
@@ -17,7 +16,7 @@ def softmax(x, derivative=False) -> np.ndarray:
 def tanh(x, derivative=False):
     y = np.tanh(x)
     if derivative:
-        return 1-np.square(x)
+        return 1-np.square(y)
 
     return y
 
