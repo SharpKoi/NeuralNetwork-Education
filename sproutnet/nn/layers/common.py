@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Tuple, Callable
+from typing import Tuple, Callable, Union
 
 import cupy as cp
 import numpy as np
@@ -50,13 +50,13 @@ class Activation(Layer):
 class Embedding(Layer):
     def __init__(self,
                  input_length: int,
-                 weights: cp.ndarray,
+                 weights: Union[cp.ndarray, np.ndarray],
                  name: str = None,
                  trainable: bool = False):
         super().__init__(units=-1, name=name, trainable=trainable)
         self.input_length = input_length
         self.input_shape = (self.input_length,)
-        self.weights = weights
+        self.weights = cp.asarray(weights) if cp.cuda.is_available() else np.copy(weights)
         self.embedding_dim = self.weights.shape[-1]
         self.output_shape = (self.input_length, self.embedding_dim)
 
@@ -70,7 +70,11 @@ class Embedding(Layer):
         self.output = np.empty(shape=(batch_size, input_dim, self.weights.shape[1]))
 
         for i in range(batch_size):
-            self.output[i] = self.weights.get()[input_data[i].tolist()]
+            weight = self.weights[input_data[i].tolist()]
+            if cp.cuda.is_available():
+                self.output[i] = weight.get()
+            else:
+                self.output[i] = weight
 
         return self.output
 

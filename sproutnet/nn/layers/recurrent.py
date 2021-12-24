@@ -20,11 +20,17 @@ class LSTM(Layer):
     units: int
         the output dim of this layer
     input_shape: Tuple[int]
-        the input shape without batch size thus should be 2d
-    activator: Any
-        the activator function used to activate i, f, o in each cell
-    cell_activator: Any
-        the activator function used to activate c in each cell
+        the input shape without batch size thus should be 2d (sequence length, input dim)
+    activator: Callable
+        the activator function used to activate i, f, o gates in each cell
+    cell_activator: Callable
+        the activator function used to activate c gate and hypothesis in each cell
+    weights_initializer: Initializer
+        the initializer of input weights. default is `sproutnet.nn.initializer.GlorotUniform`
+    state_weights_initializer: Initializer
+        the initializer of state weights. default is `sproutnet.nn.initializer.Orthogonal`
+    bias_initializer: Initializer
+        the initializer of bias. default is `sproutnet.nn.initializer.Zeros`
     return_sequence: bool
         return the outputs of all the lstm cells or not
     truncate_size: int
@@ -67,10 +73,7 @@ class LSTM(Layer):
         self.bias = self.bias_initializer(shape=(4, self.units))
 
         # declare gates and signals
-        self.cache_input = None
-        self.cache_forget = None
-        self.cache_output = None
-        self.cache_cell = None
+        self.raw_gates = None
         self.cell_states = None
         self.hidden_states = None
 
@@ -82,41 +85,35 @@ class LSTM(Layer):
 
         self.input = input_data
 
-        zeros = np.zeros(shape=(batch_size, self.timesteps+1, self.units))
-        self.cache_input = np.copy(zeros)
-        self.cache_forget = np.copy(zeros)
-        self.cache_output = np.copy(zeros)
-        self.cache_cell = np.copy(zeros)
-        self.cell_states = np.copy(zeros)
-        self.hidden_states = np.copy(zeros)
+        self.raw_gates = np.zeros(shape=(4, batch_size, self.timesteps, self.units))
+        gates = np.empty(shape=(4, batch_size, self.timesteps, self.units))
+
+        self.cell_states = np.zeros(shape=(batch_size, self.timesteps+1, self.units))
+        self.hidden_states = np.copy(self.cell_states)
 
         for i in range(batch_size):
-            # shift 1 to preserve zeros at the first.
-            for t in range(1, self.timesteps+1):
+            for t in range(self.timesteps):
                 # get x_t, h_t-1, c_t-1
-                x = input_data[i][t-1]
-                h = self.hidden_states[i][t-1]
-                c = self.cell_states[i][t-1]
+                x = input_data[i, t, :]
+                h = self.hidden_states[i, t, :]
+                c = self.cell_states[i, t, :]
 
                 # ====================== start computing feedforward ====================== #
-                self.cache_input[i][t] = np.dot(self.weights[0], x) + np.dot(self.state_weights[0], h) + self.bias[0]
-                self.cache_forget[i][t] = np.dot(self.weights[1], x) + np.dot(self.state_weights[1], h) + self.bias[1]
-                self.cache_output[i][t] = np.dot(self.weights[2], x) + np.dot(self.state_weights[2], h) + self.bias[2]
-                self.cache_cell[i][t] = np.dot(self.weights[3], x) + np.dot(self.state_weights[3], h) + self.bias[3]
+                for j in range(4):
+                    self.raw_gates[j, i, t, :] = np.dot(self.weights[j], x) + np.dot(self.state_weights[j], h) + self.bias[j]
 
-                input_gate = self.activator(self.cache_input[i][t])
-                forget_gate = self.activator(self.cache_forget[i][t])
-                output_gate = self.activator(self.cache_output[i][t])
-                cell_input = self.cell_activator(self.cache_cell[i][t])
+                gates[:-1, i, t, :] = self.activator(self.raw_gates[:-1, i, t, :])
+                gates[-1, i, t, :] = self.cell_activator(self.raw_gates[-1, i, t, :])
 
-                self.cell_states[i][t] = forget_gate * c + input_gate * cell_input
-                self.hidden_states[i][t] = output_gate * self.cell_activator(self.cell_states[i][t])
+                gate_i, gate_f, gate_o, gate_c = gates
+                self.cell_states[i, t+1, :] = gate_f[i, t, :] * c + gate_i[i, t, :] * gate_c[i, t, :]
+                self.hidden_states[i, t+1, :] = gate_o[i, t, :] * self.cell_activator(self.cell_states[i, t+1, :])
                 # ====================== end of feedforward ====================== #
 
         if self.return_sequence:
-            self.output = self.hidden_states
+            self.output = self.hidden_states[:, 1:, :]
         else:
-            self.output = self.hidden_states[:, -1]
+            self.output = self.hidden_states[:, -1, :]
 
         return self.output
 
@@ -132,43 +129,45 @@ class LSTM(Layer):
 
         truncated = False
         # ====================== starting gradient computation ====================== #
-        for t in reversed(range(1, self.timesteps+1)):
+        for t in reversed(range(self.timesteps)):
+            raw_i, raw_f, raw_o, raw_c = self.raw_gates
             grad_cell_state = output_error * \
-                              self.activator(self.cache_output[:, t, :]) * \
-                              self.cell_activator(self.cell_states[:, t, :], derivative=True)
+                              self.activator(raw_o[:, t, :]) * \
+                              self.cell_activator(self.cell_states[:, t+1, :], derivative=True)
             # i
             grad_gates[0] = grad_cell_state * \
-                            self.cache_cell[:, t, :] * \
-                            self.activator(self.cache_input[:, t, :], derivative=True)
+                            self.cell_activator(raw_c[:, t, :]) * \
+                            self.activator(raw_i[:, t, :], derivative=True)
             # f
             grad_gates[1] = grad_cell_state * \
-                            self.cell_states[:, t - 1] * \
-                            self.activator(self.cache_forget[:, t, :], derivative=True)
+                            self.cell_states[:, t, :] * \
+                            self.activator(raw_f[:, t, :], derivative=True)
             # o
             grad_gates[2] = output_error * \
-                            self.cell_activator(self.cell_states[:, t, :]) * \
-                            self.activator(self.cache_output[:, t, :], derivative=True)
+                            self.cell_activator(self.cell_states[:, t+1, :]) * \
+                            self.activator(raw_o[:, t, :], derivative=True)
             # c
             grad_gates[3] = grad_cell_state * \
-                            self.activator(self.cache_input[:, t, :]) * \
-                            self.activator(self.cache_cell[:, t, :], derivative=True)
+                            self.activator(raw_i[:, t, :]) * \
+                            self.cell_activator(raw_c[:, t, :], derivative=True)
 
             # totally 4 gates: i, f, o, c
             for j in range(4):
                 # compute the next output error
-                output_error += np.matmul(grad_gates[j], self.state_weights[j].T)
+                # TODO: check if state_weights transpose
+                output_error += np.matmul(grad_gates[j], self.state_weights[j])
 
                 # update gradients only if not truncated
                 if not truncated:
                     for i in range(batch_size):
-                        grad_weights[j][i] += np.outer(grad_gates[j][i], self.input[i][t-1])
-                        grad_state_weights[j][i] += np.outer(grad_gates[j][i], self.hidden_states[i, t-1, :])
+                        grad_weights[j, i] += np.outer(grad_gates[j, i, :], self.input[i, t, :])
+                        grad_state_weights[j, i] += np.outer(grad_gates[j, i, :], self.hidden_states[i, t, :])
                     grad_bias[j] += grad_gates[j]
 
                 # (batch_size, input_dim) <- (batch_size, units)(units, input_dim)
-                grad_hypothesis[:, t-1, :] += np.matmul(grad_gates[j], self.weights[j])
+                grad_hypothesis[:, t, :] += np.matmul(grad_gates[j], self.weights[j])
 
-            truncated = ((self.timesteps - t - 1) % self.truncate_size) == 0
+            truncated = ((self.timesteps - t) % self.truncate_size) == 0
         # ====================== end of gradient computation ====================== #
 
         # do BPTT

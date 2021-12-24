@@ -4,7 +4,7 @@ import numpy as np
 
 
 class Metric(ABC):
-    def __call__(self, y_true, y_pred):
+    def __call__(self, y_pred, y_true):
         raise NotImplementedError
 
 
@@ -12,7 +12,7 @@ class BinaryAccuracy(Metric):
     def __init__(self, threshold: float = 0.5):
         self.threshold = threshold
 
-    def __call__(self, y_true, y_pred):
+    def __call__(self, y_pred, y_true):
         assert y_true.shape == y_pred.shape
         n_data, n_labels = y_true.shape
 
