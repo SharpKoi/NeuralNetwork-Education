@@ -13,7 +13,7 @@ def mean_squared_error(output: np.ndarray, target: np.ndarray, derivative=False)
         return np.mean(np.square(target - output), axis=-1)
 
 
-def binary_cross_entropy(output: np.array, target: np.array, epsilon=1e-8, derivative=False) -> np.ndarray:
+def binary_cross_entropy(output: np.array, target: np.array, epsilon=1e-12, derivative=False) -> np.ndarray:
     assert output.shape == target.shape
 
     output = np.clip(output, epsilon, 1-epsilon)
