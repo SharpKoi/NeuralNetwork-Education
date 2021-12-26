@@ -1,4 +1,4 @@
-from typing import Tuple, Callable, Optional
+from typing import Tuple, Callable, Optional, List
 
 import numpy as np
 
@@ -58,6 +58,7 @@ class LSTM(Layer):
         self.bias_initializer = bias_initializer if bias_initializer else Zeros()
         self.return_sequence = return_sequence
         self.truncate_size = truncate_size
+        self.trainable_params = [None] * 3
         if input_shape:
             self.input_shape = input_shape
             self.timesteps, self.input_dim = input_shape
@@ -68,9 +69,12 @@ class LSTM(Layer):
                 if not self.weights_initializer:
                     self.weights_initializer = GlorotUniform(self.input_dim, self.units)
                 self.weights = weights_initializer(shape=(4, self.units, self.input_dim))
+                self.trainable_params[0] = self.weights
 
         self.state_weights = self.state_weights_initializer(shape=(4, self.units, self.units))
+        self.trainable_params[1] = self.state_weights
         self.bias = self.bias_initializer(shape=(4, self.units))
+        self.trainable_params[2] = self.bias
 
         # declare gates and signals
         self.raw_gates = None
@@ -117,11 +121,12 @@ class LSTM(Layer):
 
         return self.output
 
-    def backward_propagate(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+    def backward_propagate(self, output_error: np.ndarray) -> Tuple[np.ndarray, List[np.ndarray]]:
         # output_error (batch_size, units)
         batch_size = output_error.shape[0]
 
         grad_gates = np.zeros(shape=(4, batch_size, self.units))
+        # grad_cell_state = np.zeros(shape=(batch_size, self.timesteps+1, self.units))
         grad_weights = np.zeros(shape=(4, batch_size, *self.weights.shape[1:]))
         grad_state_weights = np.zeros(shape=(4, batch_size, *self.state_weights.shape[1:]))
         grad_bias = np.zeros(shape=(4, batch_size, *self.bias.shape[1:]))
@@ -131,9 +136,10 @@ class LSTM(Layer):
         # ====================== starting gradient computation ====================== #
         for t in reversed(range(self.timesteps)):
             raw_i, raw_f, raw_o, raw_c = self.raw_gates
+
             grad_cell_state = output_error * \
-                              self.activator(raw_o[:, t, :]) * \
-                              self.cell_activator(self.cell_states[:, t+1, :], derivative=True)
+                                       self.activator(raw_o[:, t, :]) * \
+                                       self.cell_activator(self.cell_states[:, t+1, :], derivative=True)
             # i
             grad_gates[0] = grad_cell_state * \
                             self.cell_activator(raw_c[:, t, :]) * \
@@ -154,7 +160,6 @@ class LSTM(Layer):
             # totally 4 gates: i, f, o, c
             for j in range(4):
                 # compute the next output error
-                # TODO: check if state_weights transpose
                 output_error += np.matmul(grad_gates[j], self.state_weights[j])
 
                 # update gradients only if not truncated
@@ -171,11 +176,14 @@ class LSTM(Layer):
         # ====================== end of gradient computation ====================== #
 
         # do BPTT
-        self.weights -= learning_rate * grad_weights.mean(axis=1)
-        self.state_weights -= learning_rate * grad_state_weights.mean(axis=1)
-        self.bias -= learning_rate * grad_bias.mean(axis=1)
+        grad_params = list()
+        if self.trainable:
+            grad_params = [grad_weights.mean(axis=1), grad_state_weights.mean(axis=1), grad_bias.mean(axis=1)]
+            # self.weights -= learning_rate * grad_weights.mean(axis=1)
+            # self.state_weights -= learning_rate * grad_state_weights.mean(axis=1)
+            # self.bias -= learning_rate * grad_bias.mean(axis=1)
 
-        return grad_hypothesis
+        return grad_hypothesis, grad_params
 
     def concatenate(self, last_layer: Layer):
         if self.input_shape is None:
@@ -186,6 +194,7 @@ class LSTM(Layer):
             # i, f, o, c
             if self.input_dim > 0:
                 self.weights = np.random.uniform(size=(4, self.units, self.input_dim))
+                self.trainable_params[0] = self.weights
 
         assert self.input_shape == last_layer.output_shape, \
             f'The input shape {self.input_shape} of layer "{self.name}" ' \

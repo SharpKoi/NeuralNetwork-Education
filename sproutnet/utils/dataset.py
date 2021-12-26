@@ -1,4 +1,3 @@
-import cupy as cp
 import numpy as np
 from typing import List
 
@@ -19,3 +18,6 @@ def pad_sequences(data: List, pad_value, max_length: int = -1):
             seq.extend([pad_value] * pad_size)
 
     return data
+
+
+

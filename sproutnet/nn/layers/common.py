@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Tuple, Callable, Union
+from typing import Tuple, List, Callable, Union
 
 import cupy as cp
 import numpy as np
@@ -10,6 +10,7 @@ class Layer(ABC):
         self.name = name
         self.is_hidden = False
         self.trainable = trainable
+        self.trainable_params: List[np.ndarray] = list()
 
         self.units = units
         self.input_shape = input_shape
@@ -20,11 +21,14 @@ class Layer(ABC):
     def forward_propagate(self, input_data: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
-    def backward_propagate(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+    def backward_propagate(self, output_error: np.ndarray) -> Tuple[np.ndarray, List[np.ndarray]]:
         raise NotImplementedError
 
     def concatenate(self, last_layer):
         raise NotImplementedError
+
+    def __call__(self, input_data):
+        return self.forward_propagate(input_data)
 
 
 class Activation(Layer):
@@ -40,8 +44,8 @@ class Activation(Layer):
 
         return self.output
 
-    def backward_propagate(self, output_error, learning_rate):
-        return self.activator(self.input, derivative=True) * output_error
+    def backward_propagate(self, output_error) -> Tuple[np.ndarray, List[np.ndarray]]:
+        return self.activator(self.input, derivative=True) * output_error, list()
 
     def concatenate(self, last_layer: Layer):
         self.input_shape = self.output_shape = last_layer.output_shape
@@ -59,6 +63,8 @@ class Embedding(Layer):
         self.weights = cp.asarray(weights) if cp.cuda.is_available() else np.copy(weights)
         self.embedding_dim = self.weights.shape[-1]
         self.output_shape = (self.input_length, self.embedding_dim)
+        if trainable:
+            self.trainable_params.append(self.weights)
 
     def forward_propagate(self, input_data: np.ndarray) -> np.ndarray:
         # (batch_size, id_seq)
@@ -78,7 +84,8 @@ class Embedding(Layer):
 
         return self.output
 
-    def backward_propagate(self, output_error: np.ndarray, learning_rate: float) -> np.ndarray:
+    def backward_propagate(self, output_error: np.ndarray) -> Tuple[np.ndarray, List[np.ndarray]]:
+        grad_params = list()
         if self.trainable:
             batch_size = output_error.shape[0]
             grad_weights = cp.zeros(shape=self.weights.shape)
@@ -91,10 +98,11 @@ class Embedding(Layer):
             divisors[divisors == 0] = 1
             grad_weights /= divisors
 
-            self.weights -= learning_rate * grad_weights
+            grad_params.append(grad_weights)
+            # self.weights -= learning_rate * grad_weights
 
-            # there's no sense to update the input sequences
-        return np.zeros(shape=self.input_shape)
+            # there's no sense to update the raw input sequences
+        return np.zeros(shape=self.input_shape), grad_params
 
     def concatenate(self, last_layer):
         """In almost all cases, Embedding layer is the first layer."""
